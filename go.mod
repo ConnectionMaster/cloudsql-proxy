@@ -4,13 +4,13 @@ go 1.13
 
 require (
 	bazil.org/fuse v0.0.0-20180421153158-65cc252bf669
-	cloud.google.com/go v0.70.0
-	github.com/denisenkom/go-mssqldb v0.0.0-20200910202707-1e08a3fab204
+	cloud.google.com/go v0.77.0
+	github.com/denisenkom/go-mssqldb v0.9.0
 	github.com/go-sql-driver/mysql v1.5.0
-	github.com/lib/pq v1.8.0
-	golang.org/x/net v0.0.0-20201027133719-8eef5233e2a1
-	golang.org/x/oauth2 v0.0.0-20200902213428-5d25da1a8d43
-	google.golang.org/api v0.34.0
+	github.com/lib/pq v1.9.0
+	golang.org/x/net v0.0.0-20210119194325-5f4716e94777
+	golang.org/x/oauth2 v0.0.0-20210216194517-16ff1888fd2e
+	google.golang.org/api v0.40.0
 )
 
 replace bazil.org/fuse => bazil.org/fuse v0.0.0-20180421153158-65cc252bf669 // pin to latest version that supports macOS. see https://github.com/bazil/fuse/issues/224

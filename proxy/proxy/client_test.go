@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 const instance = "instance-name"
@@ -246,12 +247,6 @@ func TestShutdownTerminatesEarly(t *testing.T) {
 }
 
 func TestRefreshTimer(t *testing.T) {
-	oldRefreshCertBuffer := refreshCertBuffer
-	defer func() {
-		refreshCertBuffer = oldRefreshCertBuffer
-	}()
-	refreshCertBuffer = time.Second
-
 	timeToExpire := 5 * time.Second
 	b := &fakeCerts{}
 	certCreated := time.Now()
@@ -266,6 +261,7 @@ func TestRefreshTimer(t *testing.T) {
 			return nil, errFakeDial
 		},
 		RefreshCfgThrottle: 20 * time.Millisecond,
+		RefreshCfgBuffer:   time.Second,
 	}
 	// Call Dial to cache the cert.
 	if _, err := c.Dial(instance); err != errFakeDial {
@@ -288,5 +284,13 @@ func TestRefreshTimer(t *testing.T) {
 	}
 	if !newCfg.lastRefreshed.After(cfg.lastRefreshed) {
 		t.Error("expected cert to be refreshed.")
+	}
+}
+
+func TestSyncAtomicAlignment(t *testing.T) {
+	// The sync/atomic pkg has a bug that requires the developer to guarantee 64-bit alignment when using 64-bit functions on 32-bit systems.
+	c := &Client{}
+	if a := unsafe.Offsetof(c.ConnectionsCounter); a%64 != 0 {
+		t.Errorf("Client.ConnectionsCounter is not aligned: want %v, got %v", 0, a)
 	}
 }

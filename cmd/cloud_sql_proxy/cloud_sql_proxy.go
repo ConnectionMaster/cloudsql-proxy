@@ -211,7 +211,7 @@ Information for all flags:
 var defaultTmp = filepath.Join(os.TempDir(), "cloudsql-proxy-tmp")
 
 // versionString indiciates the version of the proxy currently in use.
-var versionString = "1.18.1-dev"
+var versionString = "1.19.3-dev"
 
 // metadataString indiciates additional build or distribution metadata.
 var metadataString = ""
@@ -345,7 +345,7 @@ func listInstances(ctx context.Context, cl *http.Client, projects []string) ([]s
 				for _, in := range r.Items {
 					// The Proxy is only support on Second Gen
 					if in.BackendType == "SECOND_GEN" {
-						ch <- fmt.Sprintf("%s:%s:%s", in.Project, in.Region, in.Name)
+						ch <- in.ConnectionName
 					}
 				}
 				return nil

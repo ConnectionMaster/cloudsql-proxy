@@ -32,14 +32,14 @@ import (
 const (
 	DefaultRefreshCfgThrottle = time.Minute
 	keepAlivePeriod           = time.Minute
+	defaultRefreshCfgBuffer   = 5 * time.Minute
 )
 
 var (
 	// errNotCached is returned when the instance was not found in the Client's
 	// cache. It is an internal detail and is not actually ever returned to the
 	// user.
-	errNotCached      = errors.New("instance was not found in cache")
-	refreshCertBuffer = 30 * time.Second
+	errNotCached = errors.New("instance was not found in cache")
 )
 
 // Conn represents a connection from a client to a specific instance.
@@ -60,6 +60,13 @@ type CertSource interface {
 // Client is a type to handle connecting to a Server. All fields are required
 // unless otherwise specified.
 type Client struct {
+	// ConnectionsCounter is used to enforce the optional maxConnections limit
+	ConnectionsCounter uint64
+
+	// MaxConnections is the maximum number of connections to establish
+	// before refusing new connections. 0 means no limit.
+	MaxConnections uint64
+
 	// Port designates which remote port should be used when connecting to
 	// instances. This value is defined by the server-side code, but for now it
 	// should always be 3307.
@@ -76,13 +83,6 @@ type Client struct {
 	// Dialer should return a new connection to the provided address. It will be used only if ContextDialer is nil.
 	Dialer func(net, addr string) (net.Conn, error)
 
-	// RefreshCfgThrottle is the amount of time to wait between configuration
-	// refreshes. If not set, it defaults to 1 minute.
-	//
-	// This is to prevent quota exhaustion in the case of client-side
-	// malfunction.
-	RefreshCfgThrottle time.Duration
-
 	// The cfgCache holds the most recent connection configuration keyed by
 	// instance. Relevant functions are refreshCfg and cachedCfg. It is
 	// protected by cacheL.
@@ -92,12 +92,16 @@ type Client struct {
 	// refreshCfgL prevents multiple goroutines from contacting the Cloud SQL API at once.
 	refreshCfgL sync.Mutex
 
-	// MaxConnections is the maximum number of connections to establish
-	// before refusing new connections. 0 means no limit.
-	MaxConnections uint64
+	// RefreshCfgThrottle is the amount of time to wait between configuration
+	// refreshes. If not set, it defaults to 1 minute.
+	//
+	// This is to prevent quota exhaustion in the case of client-side
+	// malfunction.
+	RefreshCfgThrottle time.Duration
 
-	// ConnectionsCounter is used to enforce the optional maxConnections limit
-	ConnectionsCounter uint64
+	// RefreshCertBuffer is the amount of time before the configuration expires to
+	// attempt to refresh it. If not set, it defaults to 5 minutes.
+	RefreshCfgBuffer time.Duration
 }
 
 type cacheEntry struct {
@@ -166,6 +170,11 @@ func (c *Client) refreshCfg(instance string) (addr string, cfg *tls.Config, vers
 		throttle = DefaultRefreshCfgThrottle
 	}
 
+	refreshCfgBuffer := c.RefreshCfgBuffer
+	if refreshCfgBuffer == 0 {
+		refreshCfgBuffer = defaultRefreshCfgBuffer
+	}
+
 	c.cacheL.Lock()
 	if c.cfgCache == nil {
 		c.cfgCache = make(map[string]cacheEntry)
@@ -179,6 +188,12 @@ func (c *Client) refreshCfg(instance string) (addr string, cfg *tls.Config, vers
 	}
 
 	defer func() {
+		// if we failed to refresh cfg do not throw out potentially valid one
+		if err != nil && !isExpired(old.cfg) {
+			logging.Errorf("failed to refresh the ephemeral certificate for %s, returning previous cert instead: %v", instance, err)
+			addr, cfg, version, err = old.addr, old.cfg, old.version, old.err
+		}
+
 		c.cacheL.Lock()
 		c.cfgCache[instance] = cacheEntry{
 			lastRefreshed: time.Now(),
@@ -219,7 +234,7 @@ func (c *Client) refreshCfg(instance string) (addr string, cfg *tls.Config, vers
 
 	expire := mycert.Leaf.NotAfter
 	now := time.Now()
-	timeToRefresh := expire.Sub(now) - refreshCertBuffer
+	timeToRefresh := expire.Sub(now) - refreshCfgBuffer
 	if timeToRefresh <= 0 {
 		err = fmt.Errorf("new ephemeral certificate expires too soon: current time: %v, certificate expires: %v", expire, now)
 		logging.Errorf("ephemeral certificate (%+v) error: %v", mycert, err)
@@ -266,6 +281,9 @@ func genVerifyPeerCertificateFunc(instanceName string, pool *x509.CertPool) func
 }
 
 func isExpired(cfg *tls.Config) bool {
+	if cfg == nil {
+		return true
+	}
 	return time.Now().After(cfg.Certificates[0].Leaf.NotAfter)
 }
 
